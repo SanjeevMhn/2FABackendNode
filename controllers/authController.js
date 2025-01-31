@@ -204,7 +204,7 @@ const verifyPassword = async (req, res) => {
     const { user_id, user_email } = req;
     const { password } = req.body;
     if (!password) {
-      return res.status(404).message({
+      return res.status(404).json({
         success: false,
         message: "Please provide the required fields.",
       });
