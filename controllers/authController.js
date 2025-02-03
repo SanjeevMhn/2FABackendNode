@@ -87,16 +87,31 @@ const login = async (req, res) => {
       });
     }
 
-    const accessToken = jwt.sign(
-      {
-        user_info: {
-          user_id: userExists[0].user_id,
-          user_email: userExists[0].user_email,
+    if (userExists[0].user_secret == null) {
+      const accessToken = jwt.sign(
+        {
+          user_info: {
+            user_id: userExists[0].user_id,
+            user_email: userExists[0].user_email,
+          },
         },
-      },
-      process.env.ACCESS_TOKEN_SECRET,
-      { expiresIn: "1d" }
-    );
+        process.env.ACCESS_TOKEN_SECRET,
+        { expiresIn: "1d" }
+      );
+
+      res.status(200).json({
+        success: true,
+        message: "Logged in successfully",
+        accessToken: accessToken,
+      });
+      return;
+    }
+
+    return res.status(200).json({
+      success: true,
+      otp_required: true,
+      message: "Verify OTP",
+    });
 
     // const refreshToken = jwt.sign(
     //   {
@@ -123,11 +138,6 @@ const login = async (req, res) => {
     //   sameSite: "Strict",
     //   maxAge: 24 * 60 * 60 * 1000,
     // });
-    res.status(200).json({
-      success: true,
-      message: "Logged in successfully",
-      accessToken: accessToken,
-    });
   } catch (err) {
     console.error(err);
     res.status(500).json({
@@ -269,7 +279,6 @@ const enableTwoFA = async (req, res) => {
       .where("user_id", user_id)
       .update("user_secret", userSecret);
 
-
     return res.status(200).json({
       success: true,
       message: "2FA enabled successfully",
@@ -300,17 +309,14 @@ const disableTwoFA = async (req, res) => {
       });
     }
 
-    if(userExists[0].user_secret == null){
+    if (userExists[0].user_secret == null) {
       return res.status(400).json({
         success: false,
         message: "User does not have 2FA enabled",
       });
     }
 
-    await knex("users")
-      .where("user_id", user_id)
-      .update("user_secret", null);
-
+    await knex("users").where("user_id", user_id).update("user_secret", null);
 
     return res.status(200).json({
       success: true,
@@ -326,11 +332,89 @@ const disableTwoFA = async (req, res) => {
   }
 };
 
+const verifyOTP = async (req, res) => {
+  try {
+    let { user_email, user_password, token } = req.body;
+
+    if (!token) {
+      return res.status(404).json({
+        success: false,
+        message: "OTP required",
+      });
+    }
+
+    const user = await knex
+      .select("user_secret", "user_id", "user_email", "user_password")
+      .from("users")
+      .where("user_email", user_email);
+
+    if (user.length == 0) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    if (user[0].user_secret == null) {
+      return res.status(400).json({
+        success: false,
+        message: "User has not enabled 2FA",
+      });
+    }
+
+    const decryptedPassword = await bcrypt.compare(user_password, user[0].user_password)
+    if(!decryptedPassword){
+      return res.status(403).json({
+        message: "Invalid email or password"
+      })
+    }
+
+    const userSecret = JSON.parse(user[0].user_secret);
+    const verified = speakeasy.totp.verify({
+      secret: userSecret.base32,
+      encoding: "base32",
+      token,
+      window: 1,
+    });
+
+    if (!verified) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid Token",
+      });
+    }
+
+    const accessToken = jwt.sign(
+      {
+        user_info: {
+          user_id: user[0].user_id,
+          user_email: user[0].user_email,
+        },
+      },
+      process.env.ACCESS_TOKEN_SECRET,
+      { expiresIn: "1d" }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Logged in successfully",
+      accessToken: accessToken,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      success: false,
+      message: "Error verifying user OTP",
+    });
+  }
+};
+
 module.exports = {
   register,
   login,
   getUserDetails,
   verifyPassword,
   enableTwoFA,
-  disableTwoFA
+  disableTwoFA,
+  verifyOTP
 };

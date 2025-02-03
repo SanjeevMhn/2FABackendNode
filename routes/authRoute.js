@@ -25,4 +25,8 @@ router
     .route("/disable-2fa")
     .post(verifyJWT, require("../controllers/authController").disableTwoFA)
 
+router
+    .route("/verify-otp")
+    .post(require("../controllers/authController").verifyOTP)
+
 module.exports = router
